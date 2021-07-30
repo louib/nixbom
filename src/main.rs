@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
-use std::io::Error;
+use std::io::{Error, ErrorKind};
 use std::path::Path;
 use std::process::Command;
 
@@ -116,6 +116,7 @@ impl Derivation for HashMap<String, Drv> {
 
 fn get_derivation_json(file: &str, is_expression: bool) -> Result<serde_json::Value, Error> {
     let output_bytes = get_derivation_bytes(file, is_expression)?;
+    println!("output bytes len = {}", output_bytes.len());
     let json = bytes_to_json(output_bytes)?;
     Ok(json)
 }
@@ -134,7 +135,17 @@ fn get_derivation_bytes(file: &str, is_expression: bool) -> Result<Vec<u8>, Erro
             .output()
     }?;
 
-    Ok(output.stdout)
+    if output.status.success() {
+        println!(
+            "Its a success. The output is {}",
+            String::from_utf8(output.stdout.clone()).unwrap(),
+        );
+        return Ok(output.stdout);
+    }
+
+    let error_message = format!("Could not get derivation for file {}:", file)
+        + &String::from_utf8(output.stderr).unwrap();
+    Err(Error::new(ErrorKind::Other, error_message))
 }
 
 fn bytes_to_json(bytes: Vec<u8>) -> serde_json::Result<serde_json::Value> {
@@ -153,9 +164,9 @@ fn get_packages_wrapper(with_cache: bool) -> Result<HashMap<String, Package>, Er
 
 fn package_fixer(packages: HashMap<String, Package>) -> HashMap<String, Package> {
     packages
-    .into_iter()
-    .map(|(_, v)| (v.name.clone(), v))
-    .collect::<HashMap<String, Package>>()
+        .into_iter()
+        .map(|(_, v)| (v.name.clone(), v))
+        .collect::<HashMap<String, Package>>()
 }
 
 fn get_packages() -> serde_json::Result<HashMap<String, Package>> {
@@ -168,9 +179,8 @@ fn get_packages() -> serde_json::Result<HashMap<String, Package>> {
         .unwrap();
 
     // TODO: Below shouldn't live in here and should be cleaned up. Should be configurable and not hard coded.
-    match File::create("nixpkgs.json")
-            .and_then(|mut f| f.write_all(&output.stdout)) {
-        Ok(_) => {},
+    match File::create("nixpkgs.json").and_then(|mut f| f.write_all(&output.stdout)) {
+        Ok(_) => {}
         Err(e) => eprintln!("{}", e),
     }
 
@@ -343,7 +353,9 @@ fn main() -> Result<(), Error> {
 
     // TODO: Handle failure better
     let derivation = matches.value_of("DERIVATION").unwrap();
+    println!("The derivation is... {}", derivation);
     let json = get_derivation_json(derivation, true)?;
+    println!("The json is... {}", json);
     let derivation_struct_map: HashMap<String, Drv> = serde_json::from_value(json)?;
     let input_derivations = derivation_struct_map.get_input_derivations();
 
@@ -364,7 +376,7 @@ fn main() -> Result<(), Error> {
         packages,
     );
 
-    println!("{}", serde_json::to_string_pretty(&sbom)?);
+    println!("allo? {}", serde_json::to_string_pretty(&sbom)?);
 
     Ok(())
 }
